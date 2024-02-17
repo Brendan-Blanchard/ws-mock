@@ -1,0 +1,18 @@
+[package]
+name = "ws-mock"
+version = "0.0.1"
+edition = "2021"
+authors = ["Brendan Blanchard"]
+description = "A websocket mock test server, inspired by Wiremock."
+license = "MIT"
+repository = "https://github.com/Brendan-Blanchard/ws-mock"
+exclude = [".idea", ".gitignore", ".github"]
+keywords = ["tokio", "async", "websocket", "mock", "test"]
+
+
+[dependencies]
+futures-util = "0.3.30"
+tokio-tungstenite = "0.21.0"
+tokio = { version = "1.33.0", features= ["full"] }
+serde_with = { version = "3.4.0", features = ["chrono"] }
+serde_json = "1.0.113"
