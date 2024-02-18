@@ -14,10 +14,10 @@ Many mocks can be mounted on a single `WsMockServer`, and calling `server.verify
 expectations were met by incoming messages. Any failures will cause a panic, detailing what messages were seen and 
 expected.
 
-Either `.respond_with(...)` or `expect(...)` is required for a mock, since mounting a mock that does not respond or 
-expect any calls will have no discernible effects. This produces a panic if a `WsMock` is mounted without a response or 
-expected number of calls. It's also perfectly valid to `.expect(0)` calls to a mock if verifying a certain type of data 
-was never received. 
+Either `.respond_with(...)`, `.forward_from_channel(...)`, or `expect(...)` is required for a mock, since mounting a 
+mock that does not respond, forward messages, or expect any calls will have no discernible effects. This produces a 
+panic if a `WsMock` is mounted without a response or expected number of calls. It's also perfectly valid to `.expect(0)` 
+calls to a mock if verifying a certain type of data was never received. 
 
 ```rust
 use futures_util::{SinkExt, StreamExt};
@@ -53,6 +53,50 @@ pub async fn main() {
 }
 ```
 
+# Example: Simulating Live Streaming Data
+Many websocket examples don't rely on responding to requests via Websocket, but instead stream data from the server with
+no client input. Testing this requires the server accepting messages and sending them to the client. 
+`WsMock.forward_from_channel(...)` accomplishes this by letting the user send arbitrary messages that the server then 
+relays to the client.
+
+In the below example, the test simulates streaming data by sending messages into the channel configured on the [WsMock].
+The mock has no `.expect(...)`, or `.respond_with(...)` calls, since its only use is forwarding messages that simulate 
+a live server.
+```rust
+use futures_util::StreamExt;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio_tungstenite::connect_async;
+use ws_mock::utils::collect_all_messages;
+use ws_mock::ws_mock_server::{WsMock, WsMockServer};
+
+#[tokio::main]
+pub async fn main() {
+    let server = WsMockServer::start().await;
+
+    let (mpsc_send, mpsc_recv) = mpsc::channel::<String>(32);
+
+    WsMock::new()
+        .forward_from_channel(mpsc_recv)
+        .mount(&server)
+        .await;
+
+    let (stream, _resp) = connect_async(server.uri().await)
+        .await
+        .expect("Connecting failed");
+
+    let (_send, ws_recv) = stream.split();
+
+    mpsc_send.send("message-1".to_string()).await.unwrap();
+    mpsc_send.send("message-2".into()).await.unwrap();
+
+    let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
+
+    server.verify().await;
+    assert_eq!(vec!["message-1", "message-2"], received);
+}
+```
+
 # Contributions
 Please reach out or submit a PR! Particularly if you have new general purpose `Matcher` implementations that would 
-benefit users. 
+benefit other users.
