@@ -100,13 +100,14 @@ impl WsMock {
     /// will be forwarded from the provided channel.
     ///
     /// # Example: Passing Messages Through
-    /// Using `.forward_from_channel(...)` allows passing a [`tokio::sync:mpsc`] channel [`Receiver`]
-    /// to a [WsMock], which will take any received values and send them through the websocket.
+    /// Tests may mock the data sent by the server, and need to assert they're parsed correctly by a
+    /// client. Since this doesn't require sending data to the server and receiving a response,
+    /// another mechanism aside from `.respond_with(...)` is needed. `forward_from_channel` fills
+    /// this need.
     ///
-    /// This allows testing from outside the call-response model set by `.respond_with(...)`, allowing
-    /// a test to simulate a stream of messages not initiated by some request.
-    ///
-    /// Here,
+    /// Here, a channel is added to a [WsMock] that has no expectations or response data, and used
+    /// to send two messages through to the client. Any subsequent client behavior canbe tested
+    /// based on the received data.
     ///
     /// ```rust
     /// use ws_mock::matchers::Any;
@@ -468,7 +469,7 @@ impl WsMockServer {
     }
 
     /// Shutdown the server and all associated tasks.
-    async fn shutdown(&mut self) {
+    pub async fn shutdown(&mut self) {
         let state_guard = self.state.read().await;
         // ignore outcome, since failure means receivers dropped anyway
         _ = state_guard.close_sender.send(());

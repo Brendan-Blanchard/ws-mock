@@ -26,7 +26,7 @@ pub async fn send_to_server(
     recv
 }
 
-/// Given a `SplitStream` receiver, receive messages until timing out and return all messages in a Vec<String>.
+/// Given a `SplitStream` receiver, receive messages until timing out and return all messages in a `Vec<String>`.
 ///
 /// Useful for receiving a batch of messages and later making assertions about them.
 pub async fn collect_all_messages(
