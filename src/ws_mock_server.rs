@@ -14,6 +14,8 @@ use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
+use tracing::debug;
+
 const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected number of calls, or forwarding_channel set. Add `.expect(...)`, `.forward_from_channel()`, or `.respond_with(...)` before mounting the mock.";
 
 /// An individual mock that matches on one or more matchers, and expects a particular number of
@@ -371,7 +373,7 @@ impl WsMockServer {
 
         while let Some(Ok(msg)) = recv.next().await {
             let text = msg.to_text().expect("Message was not text").to_string();
-            println!("Received: '{:?}'", text);
+            debug!("Received: '{:?}'", text);
 
             Self::match_mocks(state.clone(), mpsc_send.clone(), text.as_str()).await;
         }
