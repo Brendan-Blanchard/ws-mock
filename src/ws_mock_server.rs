@@ -1,14 +1,20 @@
 use crate::matchers::Matcher;
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Notify, RwLock};
+use tokio::select;
+use tokio::sync::broadcast::Receiver as BroadcastReceiver;
+use tokio::sync::broadcast::Sender as BroadcastSender;
+use tokio::sync::mpsc::Sender as MpscSender;
+use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender};
+use tokio::sync::{broadcast, mpsc, Notify, RwLock};
 use tokio::time::sleep;
-use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{accept_async, WebSocketStream};
 
-const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected number of calls. Add `.expect(...)` or `.respond_with(...)` before mounting the mock.";
+const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected number of calls, or forwarding_channel set. Add `.expect(...)`, `.forward_from_channel()`, or `.respond_with(...)` before mounting the mock.";
 
 /// An individual mock that matches on one or more matchers, and expects a particular number of
 /// calls and/or responds with configured data.
@@ -48,6 +54,7 @@ const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected num
 pub struct WsMock {
     matchers: Vec<Box<dyn Matcher>>,
     response_data: Option<String>,
+    forwarding_channel: Option<MpscReceiver<String>>,
     expected_calls: Option<usize>,
     calls: usize,
 }
@@ -63,6 +70,7 @@ impl WsMock {
         WsMock {
             matchers: Vec::new(),
             response_data: None,
+            forwarding_channel: None,
             expected_calls: None,
             calls: 0,
         }
@@ -82,6 +90,68 @@ impl WsMock {
         self
     }
 
+    /// Forward any messages from the provided mpsc `Receiver`.
+    ///
+    /// This provides the ability for "live" streams common in websockets, since you can provide any
+    /// messages directly to control the stream of messages.
+    ///
+    /// Forwarding can be used in conjunction with `.respond_with(...)` and/or `.expect(...)`, but
+    /// neither is required to use forwarding. Calling `.matcher(...)` has no effect on what values
+    /// will be forwarded from the provided channel.
+    ///
+    /// # Example: Passing Messages Through
+    /// Using `.forward_from_channel(...)` allows passing a [`tokio::sync:mpsc`] channel [`Receiver`]
+    /// to a [WsMock], which will take any received values and send them through the websocket.
+    ///
+    /// This allows testing from outside the call-response model set by `.respond_with(...)`, allowing
+    /// a test to simulate a stream of messages not initiated by some request.
+    ///
+    /// Here,
+    ///
+    /// ```rust
+    /// use ws_mock::matchers::Any;
+    /// use ws_mock::utils::collect_all_messages;
+    /// use ws_mock::ws_mock_server::{WsMock, WsMockServer};
+    /// use futures_util::StreamExt;
+    /// use tokio::sync::mpsc;
+    ///
+    /// #[tokio::main]
+    /// pub async fn main() {
+    ///     use std::time::Duration;
+    ///     use futures_util::SinkExt;
+    ///     use tokio_tungstenite::connect_async;
+    ///     let server = WsMockServer::start().await;
+    ///
+    ///     let (mpsc_send, mpsc_recv) = mpsc::channel::<String>(32);
+    ///
+    ///     WsMock::new()
+    ///         .forward_from_channel(mpsc_recv)
+    ///         .mount(&server)
+    ///         .await;
+    ///
+    ///     let (stream, _resp) = connect_async(server.uri().await)
+    ///         .await
+    ///         .expect("Connecting failed");
+    ///
+    ///     let (_send, ws_recv) = stream.split();
+    ///
+    ///     mpsc_send.send("message-1".to_string()).await.unwrap();
+    ///     mpsc_send.send("message-2".into()).await.unwrap();
+    ///
+    ///     let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
+    ///
+    ///     server.verify().await;
+    ///     assert_eq!(vec!["message-1", "message-2"], received);
+    /// }
+    /// ```
+    ///
+    /// [`tokio::sync:mpsc`]: https://docs.rs/tokio/1.36.0/tokio/sync/mpsc/index.html
+    /// [`Receiver`]: https://docs.rs/tokio/1.36.0/tokio/sync/mpsc/struct.Receiver.html
+    pub fn forward_from_channel(mut self, receiver: MpscReceiver<String>) -> Self {
+        self.forwarding_channel = Some(receiver);
+        self
+    }
+
     /// Expect for this mock to be matched against `n` times.
     ///
     /// Calling `server.verify().await` will panic if this mock did not match accordingly.
@@ -92,10 +162,13 @@ impl WsMock {
 
     /// Mount this mock to an instance of [WsMockServer]
     ///
-    /// Mounting a mock without having called `.respond_with(...)`, or `.expect(...)` will panic,
-    /// since the mock by definition has no effect.
+    /// Mounting a mock without having called `.respond_with(...)`, `.forward_from_channel(...)`, or
+    /// `.expect(...)` will panic, since the mock by definition can have no effects.
     pub async fn mount(self, server: &WsMockServer) {
-        if self.response_data.is_none() && self.expected_calls.is_none() {
+        if self.response_data.is_none()
+            && self.expected_calls.is_none()
+            && self.forwarding_channel.is_none()
+        {
             panic!("{}", INCOMPLETE_MOCK_PANIC);
         }
 
@@ -115,25 +188,30 @@ impl WsMock {
 ///
 /// `ready_notify` allows for a server in a different task/thread to communicate its readiness.
 #[doc(hidden)]
-struct MockHandle {
+struct ServerState {
     connection_string: String,
     ready_notify: Arc<Notify>,
     mocks: Vec<WsMock>,
     calls: Vec<String>,
+    close_sender: BroadcastSender<()>,
 }
 
-impl MockHandle {
-    pub fn new(url: String, port: u16, notify: Arc<Notify>) -> MockHandle {
-        MockHandle {
+impl ServerState {
+    pub fn new(url: String, port: u16, notify: Arc<Notify>) -> ServerState {
+        let (close_sender, _) = broadcast::channel::<()>(1);
+
+        ServerState {
             connection_string: format!("{}:{}", url, port),
             ready_notify: notify,
             mocks: Vec::new(),
             calls: Vec::new(),
+            close_sender,
         }
     }
 
     /// Mount a [WsMock] to the server's internal state.
-    pub fn mount(&mut self, mock: WsMock) {
+    #[doc(hidden)]
+    fn mount(&mut self, mock: WsMock) {
         self.mocks.push(mock);
     }
 }
@@ -188,7 +266,7 @@ impl MockHandle {
 /// }
 /// ```
 pub struct WsMockServer {
-    state: Arc<RwLock<MockHandle>>,
+    state: Arc<RwLock<ServerState>>,
 }
 
 impl WsMockServer {
@@ -198,7 +276,7 @@ impl WsMockServer {
     /// handler to signal readiness before returning the server to the caller.
     pub async fn start() -> WsMockServer {
         let ready_notify = Arc::new(Notify::new());
-        let state = Arc::new(RwLock::new(MockHandle::new(
+        let state = Arc::new(RwLock::new(ServerState::new(
             "127.0.0.1".to_string(),
             0,
             ready_notify.clone(),
@@ -215,7 +293,7 @@ impl WsMockServer {
 
     /// Create a new instance using the given state.
     #[doc(hidden)]
-    fn new(state: Arc<RwLock<MockHandle>>) -> WsMockServer {
+    fn new(state: Arc<RwLock<ServerState>>) -> WsMockServer {
         WsMockServer { state }
     }
 
@@ -235,7 +313,7 @@ impl WsMockServer {
     /// This is static to avoid any ownership issues, with the expectation that the caller has
     /// cloned `state` if they have other uses for it.
     #[doc(hidden)]
-    async fn listen(state: Arc<RwLock<MockHandle>>) {
+    async fn listen(state: Arc<RwLock<ServerState>>) {
         let listener = Self::get_listener(state.clone()).await;
 
         if let Ok((stream, _peer)) = listener.accept().await {
@@ -247,7 +325,7 @@ impl WsMockServer {
     /// Creates the TcpListener needed to accept connections. Once connected, it signals readiness
     /// via the `ready_notify` instance on the provided state before returning.
     #[doc(hidden)]
-    async fn get_listener(state: Arc<RwLock<MockHandle>>) -> TcpListener {
+    async fn get_listener(state: Arc<RwLock<ServerState>>) -> TcpListener {
         let mut state = state.write().await;
         let listener = TcpListener::bind(state.connection_string.as_str())
             .await
@@ -268,29 +346,93 @@ impl WsMockServer {
 
     /// Handles a single connection using the provided `TcpStream` and `MockHandle`.
     ///
-    /// This is responsible for checking if mocks match, and updating any call counts or responding
-    /// with configured data.
+    /// This is responsible for launching several listening tasks, and monitoring incoming messages
+    /// to check if mocks match. Upon matching, it optionally sends data to be put on the outgoing
+    /// websocket messages, and also updates any call counts.
     #[doc(hidden)]
-    async fn handle_connection(stream: TcpStream, state: Arc<RwLock<MockHandle>>) {
+    async fn handle_connection(stream: TcpStream, state: Arc<RwLock<ServerState>>) {
         let ws_stream = accept_async(stream)
             .await
             .expect("Failed to accept connection");
 
-        let (mut send, mut recv) = ws_stream.split();
+        let (send, mut recv) = ws_stream.split();
+
+        let (mpsc_send, mpsc_recv) = mpsc::channel::<Message>(32);
+
+        Self::spawn_forwarding_tasks(state.clone(), mpsc_send.clone()).await;
+
+        {
+            let state_guard = state.read().await;
+            let broad_recv = state_guard.close_sender.subscribe();
+
+            tokio::spawn(Self::outbound_message_task(send, mpsc_recv, broad_recv));
+        }
 
         while let Some(Ok(msg)) = recv.next().await {
             let text = msg.to_text().expect("Message was not text").to_string();
             println!("Received: '{:?}'", text);
-            let mut state_guard = state.write().await;
 
-            state_guard.calls.push(text.clone());
+            Self::match_mocks(state.clone(), mpsc_send.clone(), text.as_str()).await;
+        }
+    }
 
-            for mock in &mut state_guard.mocks {
-                if mock.matches_all(&text) {
-                    mock.calls += 1;
-                    if let Some(data) = &mock.response_data {
-                        send.send(Message::text(data)).await.unwrap();
-                    }
+    /// Spawn a task for any [WsMock] in `state` that has a forwarding_channel set.
+    #[doc(hidden)]
+    async fn spawn_forwarding_tasks(state: Arc<RwLock<ServerState>>, sender: MpscSender<Message>) {
+        let mut state_guard = state.write().await;
+
+        for mock in &mut state_guard.mocks {
+            if let Some(forwarding_channel) = mock.forwarding_channel.take() {
+                tokio::spawn(Self::forward_messages_task(
+                    forwarding_channel,
+                    sender.clone(),
+                ));
+            }
+        }
+    }
+
+    /// Forwards all incoming messages to this mock's forwarding channel to the provided outgoing
+    /// sender.
+    #[doc(hidden)]
+    async fn forward_messages_task(
+        mut incoming: MpscReceiver<String>,
+        outgoing: MpscSender<Message>,
+    ) {
+        while let Some(msg) = incoming.recv().await {
+            outgoing.send(Message::text(msg)).await.unwrap();
+        }
+    }
+
+    /// This task has sole access to the websocket sender, and is responsible for receiving messages
+    /// from an incoming `tokio::sync::mpsc::Receiver` and passing any incoming messages on to the
+    /// websocket. It will exit upon receiving input on the `tokio::sync::broadcast::Receiver`.
+    #[doc(hidden)]
+    async fn outbound_message_task(
+        mut sender: SplitSink<WebSocketStream<TcpStream>, Message>,
+        mut receiver: MpscReceiver<Message>,
+        mut close: BroadcastReceiver<()>,
+    ) {
+        loop {
+            select! {
+                Some(msg) = receiver.recv() => sender.send(msg).await.unwrap(),
+                Ok(_) = close.recv() => break,
+                else => break
+            }
+        }
+    }
+
+    /// Check if a given message matches any mocks, update call counts, and send any configured responses.
+    #[doc(hidden)]
+    async fn match_mocks(state: Arc<RwLock<ServerState>>, mpsc_send: Sender<Message>, text: &str) {
+        let mut state_guard = state.write().await;
+
+        state_guard.calls.push(text.to_string());
+
+        for mock in &mut state_guard.mocks {
+            if mock.matches_all(text) {
+                mock.calls += 1;
+                if let Some(data) = &mock.response_data {
+                    mpsc_send.send(Message::text(data)).await.unwrap();
                 }
             }
         }
@@ -324,19 +466,24 @@ impl WsMockServer {
             panic!("{}", results.join("\n"));
         }
     }
+
+    /// Shutdown the server and all associated tasks.
+    async fn shutdown(&mut self) {
+        let state_guard = self.state.read().await;
+        // ignore outcome, since failure means receivers dropped anyway
+        _ = state_guard.close_sender.send(());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::matchers::Any;
+    use crate::utils::{collect_all_messages, send_to_server};
     use crate::ws_mock_server::{WsMock, WsMockServer};
-    use futures_util::stream::SplitStream;
-    use futures_util::{SinkExt, StreamExt};
+    use futures_util::StreamExt;
     use std::time::Duration;
-    use tokio::net::TcpStream;
-    use tokio::time::timeout;
-    use tokio_tungstenite::tungstenite::Message;
-    use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+    use tokio::sync::mpsc;
+    use tokio_tungstenite::connect_async;
 
     #[tokio::test]
     async fn test_wss_mockserver() {
@@ -357,16 +504,55 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut recv = send_to_server(&server, "{ data: [42] }".into()).await;
+        let recv = send_to_server(&server, "{ data: [42] }".into()).await;
 
-        let mut received = Vec::new();
-
-        while let Ok(Some(Ok(message))) = timeout(Duration::from_millis(250), recv.next()).await {
-            received.push(message.to_string());
-        }
+        let received = collect_all_messages(recv, Duration::from_millis(250)).await;
 
         server.verify().await;
         assert_eq!(vec!["Mock-2"], received);
+    }
+
+    #[tokio::test]
+    async fn test_forwarding_channel() {
+        let server = WsMockServer::start().await;
+
+        let (mpsc_send, mpsc_recv) = mpsc::channel::<String>(32);
+
+        WsMock::new()
+            .matcher(Any::new())
+            .forward_from_channel(mpsc_recv)
+            .mount(&server)
+            .await;
+
+        let (stream, _resp) = connect_async(server.uri().await)
+            .await
+            .expect("Connecting failed");
+
+        let (_send, ws_recv) = stream.split();
+
+        mpsc_send.send("message-1".to_string()).await.unwrap();
+        mpsc_send.send("message-2".into()).await.unwrap();
+
+        let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
+
+        server.verify().await;
+        assert_eq!(vec!["message-1", "message-2"], received);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_with_active_channel() {
+        let mut server = WsMockServer::start().await;
+
+        let (_, mpsc_recv) = mpsc::channel::<String>(32);
+
+        WsMock::new()
+            .matcher(Any::new())
+            .forward_from_channel(mpsc_recv)
+            .mount(&server)
+            .await;
+
+        server.verify().await;
+        server.shutdown().await;
     }
 
     #[should_panic(expected = "Expected 2 matching calls, but received 1\nCalled With:\n\t{}")]
@@ -386,27 +572,12 @@ mod tests {
     }
 
     #[should_panic(
-        expected = "A mock must have a response or expected number of calls. Add `.expect(...)` or `.respond_with(...)` before mounting the mock."
+        expected = "A mock must have a response or expected number of calls, or forwarding_channel set. Add `.expect(...)`, `.forward_from_channel()`, or `.respond_with(...)` before mounting the mock."
     )]
     #[tokio::test]
     async fn test_incomplete_mock_failure() {
         let server = WsMockServer::start().await;
 
         WsMock::new().matcher(Any::new()).mount(&server).await;
-    }
-
-    async fn send_to_server(
-        server: &WsMockServer,
-        message: String,
-    ) -> SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        let (stream, _resp) = connect_async(server.uri().await)
-            .await
-            .expect("Connecting failed");
-
-        let (mut send, recv) = stream.split();
-
-        send.send(Message::from(message)).await.unwrap();
-
-        recv
     }
 }

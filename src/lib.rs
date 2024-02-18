@@ -8,6 +8,7 @@
 /// A common trait and useful implementations for matching against received messages.
 pub mod matchers;
 
+pub mod utils;
 /// The mock server implementation that handles `WsMock`s, expecting, verifying, and responding to
 /// messages.
 pub mod ws_mock_server;
