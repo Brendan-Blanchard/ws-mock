@@ -1,7 +1,7 @@
 # ws-mock
 A mock server for websocket testing with the ability to match arbitrarily on received messages and respond accordingly.
 
-![badge](https://github.com/Brendan-Blanchard/ws-mock/actions/workflows/main.yml/badge.svg)[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![badge](https://github.com/Brendan-Blanchard/ws-mock/actions/workflows/main.yml/badge.svg) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![codecov](https://codecov.io/gh/Brendan-Blanchard/ws-mock/graph/badge.svg?token=WKZGL0DVH4)](https://codecov.io/gh/Brendan-Blanchard/ws-mock)
 
 WS-Mock allows you to set up a mockserver to test websocket code against, with dynamic responses based on the received
 data. 
