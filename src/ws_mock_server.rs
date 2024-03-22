@@ -56,7 +56,7 @@ const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected num
 pub struct WsMock {
     matchers: Vec<Box<dyn Matcher>>,
     response_data: Option<String>,
-    forwarding_channel: Option<MpscReceiver<String>>,
+    forwarding_channel: Option<MpscReceiver<Message>>,
     expected_calls: Option<usize>,
     calls: usize,
 }
@@ -123,9 +123,10 @@ impl WsMock {
     ///     use std::time::Duration;
     ///     use futures_util::SinkExt;
     ///     use tokio_tungstenite::connect_async;
+    ///     use tokio_tungstenite::tungstenite::Message;
     ///     let server = WsMockServer::start().await;
     ///
-    ///     let (mpsc_send, mpsc_recv) = mpsc::channel::<String>(32);
+    ///     let (mpsc_send, mpsc_recv) = mpsc::channel::<Message>(32);
     ///
     ///     WsMock::new()
     ///         .forward_from_channel(mpsc_recv)
@@ -138,8 +139,8 @@ impl WsMock {
     ///
     ///     let (_send, ws_recv) = stream.split();
     ///
-    ///     mpsc_send.send("message-1".to_string()).await.unwrap();
-    ///     mpsc_send.send("message-2".into()).await.unwrap();
+    ///     mpsc_send.send(Message::Text("message-1".to_string())).await.unwrap();
+    ///     mpsc_send.send(Message::Text("message-2".into())).await.unwrap();
     ///
     ///     let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
     ///
@@ -150,7 +151,7 @@ impl WsMock {
     ///
     /// [`tokio::sync:mpsc`]: https://docs.rs/tokio/1.36.0/tokio/sync/mpsc/index.html
     /// [`Receiver`]: https://docs.rs/tokio/1.36.0/tokio/sync/mpsc/struct.Receiver.html
-    pub fn forward_from_channel(mut self, receiver: MpscReceiver<String>) -> Self {
+    pub fn forward_from_channel(mut self, receiver: MpscReceiver<Message>) -> Self {
         self.forwarding_channel = Some(receiver);
         self
     }
@@ -398,11 +399,11 @@ impl WsMockServer {
     /// sender.
     #[doc(hidden)]
     async fn forward_messages_task(
-        mut incoming: MpscReceiver<String>,
+        mut incoming: MpscReceiver<Message>,
         outgoing: MpscSender<Message>,
     ) {
         while let Some(msg) = incoming.recv().await {
-            outgoing.send(Message::text(msg)).await.unwrap();
+            outgoing.send(msg).await.unwrap();
         }
     }
 
@@ -487,6 +488,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::mpsc;
     use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
 
     #[tokio::test]
     async fn test_wss_mockserver() {
@@ -519,7 +521,7 @@ mod tests {
     async fn test_forwarding_channel() {
         let server = WsMockServer::start().await;
 
-        let (mpsc_send, mpsc_recv) = mpsc::channel::<String>(32);
+        let (mpsc_send, mpsc_recv) = mpsc::channel::<Message>(32);
 
         WsMock::new()
             .matcher(Any::new())
@@ -533,8 +535,8 @@ mod tests {
 
         let (_send, ws_recv) = stream.split();
 
-        mpsc_send.send("message-1".to_string()).await.unwrap();
-        mpsc_send.send("message-2".into()).await.unwrap();
+        mpsc_send.send(Message::Text("message-1".to_string())).await.unwrap();
+        mpsc_send.send(Message::Text("message-2".into())).await.unwrap();
 
         let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
 
@@ -546,7 +548,7 @@ mod tests {
     async fn test_shutdown_with_active_channel() {
         let mut server = WsMockServer::start().await;
 
-        let (_, mpsc_recv) = mpsc::channel::<String>(32);
+        let (_, mpsc_recv) = mpsc::channel::<Message>(32);
 
         WsMock::new()
             .matcher(Any::new())
