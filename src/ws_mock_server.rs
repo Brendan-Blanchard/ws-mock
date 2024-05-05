@@ -40,11 +40,12 @@ const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected num
 ///
 /// #[tokio::main]
 /// async fn main() -> () {
-///     let server = WsMockServer::start().await;
+///     use tokio_tungstenite::tungstenite::Message;
+/// let server = WsMockServer::start().await;
 ///
 ///     WsMock::new()
 ///         .matcher(Any::new())
-///         .respond_with("Hello World".to_string())
+///         .respond_with(Message::Text("Hello World".to_string()))
 ///         .expect(0)
 ///         .mount(&server)
 ///         .await;
@@ -55,7 +56,7 @@ const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected num
 #[derive(Debug)]
 pub struct WsMock {
     matchers: Vec<Box<dyn Matcher>>,
-    response_data: Option<String>,
+    response_data: Option<Message>,
     forwarding_channel: Option<MpscReceiver<Message>>,
     expected_calls: Option<usize>,
     calls: usize,
@@ -87,7 +88,7 @@ impl WsMock {
     }
 
     /// Respond with a message, if/when all attached matchers match on a message.
-    pub fn respond_with(mut self, data: String) -> Self {
+    pub fn respond_with(mut self, data: Message) -> Self {
         self.response_data = Some(data);
         self
     }
@@ -145,7 +146,7 @@ impl WsMock {
     ///     let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
     ///
     ///     server.verify().await;
-    ///     assert_eq!(vec!["message-1", "message-2"], received);
+    ///     assert_eq!(vec![Message::Text("message-1".to_string()), Message::Text("message-2".to_string())], received);
     /// }
     /// ```
     ///
@@ -245,7 +246,7 @@ impl ServerState {
 ///
 ///     WsMock::new()
 ///         .matcher(Any::new())
-///         .respond_with("Hello World".to_string())
+///         .respond_with(Message::Text("Hello World".to_string()))
 ///         .expect(1)
 ///         .mount(&server)
 ///         .await;
@@ -436,7 +437,7 @@ impl WsMockServer {
             if mock.matches_all(text) {
                 mock.calls += 1;
                 if let Some(data) = &mock.response_data {
-                    mpsc_send.send(Message::text(data)).await.unwrap();
+                    mpsc_send.send(data.clone()).await.unwrap();
                 }
             }
         }
@@ -504,7 +505,7 @@ mod tests {
         // ::default() is same as ::new()
         WsMock::default()
             .matcher(Any::new())
-            .respond_with("Mock-2".to_string())
+            .respond_with(Message::Text("Mock-2".to_string()))
             .expect(1)
             .mount(&server)
             .await;
@@ -514,7 +515,27 @@ mod tests {
         let received = collect_all_messages(recv, Duration::from_millis(250)).await;
 
         server.verify().await;
-        assert_eq!(vec!["Mock-2"], received);
+        assert_eq!(vec![Message::Text("Mock-2".to_string())], received);
+    }
+
+    #[tokio::test]
+    async fn test_mock_other_message_type() {
+        let server = WsMockServer::start().await;
+        let message = vec![u8::MIN, u8::MAX];
+
+        WsMock::default()
+            .matcher(Any::new())
+            .respond_with(Message::Binary(message.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let recv = send_to_server(&server, "{ data: [42] }".into()).await;
+
+        let received = collect_all_messages(recv, Duration::from_millis(250)).await;
+
+        server.verify().await;
+        assert_eq!(vec![Message::Binary(message)], received);
     }
 
     #[tokio::test]
@@ -535,13 +556,25 @@ mod tests {
 
         let (_send, ws_recv) = stream.split();
 
-        mpsc_send.send(Message::Text("message-1".to_string())).await.unwrap();
-        mpsc_send.send(Message::Text("message-2".into())).await.unwrap();
+        mpsc_send
+            .send(Message::Text("message-1".to_string()))
+            .await
+            .unwrap();
+        mpsc_send
+            .send(Message::Text("message-2".into()))
+            .await
+            .unwrap();
 
         let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
 
         server.verify().await;
-        assert_eq!(vec!["message-1", "message-2"], received);
+        assert_eq!(
+            vec![
+                Message::Text("message-1".to_string()),
+                Message::Text("message-2".to_string()),
+            ],
+            received
+        );
     }
 
     #[tokio::test]
@@ -567,7 +600,7 @@ mod tests {
 
         WsMock::new()
             .matcher(Any::new())
-            .respond_with("Mock-1".to_string())
+            .respond_with(Message::Text("Mock-1".to_string()))
             .expect(2)
             .mount(&server)
             .await;

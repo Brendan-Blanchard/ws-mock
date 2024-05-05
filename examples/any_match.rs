@@ -12,7 +12,7 @@ pub async fn main() {
 
     WsMock::new()
         .matcher(Any::new())
-        .respond_with("Hello World".to_string())
+        .respond_with(Message::Text("Hello World".to_string()))
         .expect(1)
         .mount(&server)
         .await;
@@ -28,9 +28,9 @@ pub async fn main() {
     let mut received = Vec::new();
 
     while let Ok(Some(Ok(message))) = timeout(Duration::from_millis(100), recv.next()).await {
-        received.push(message.to_string());
+        received.push(message);
     }
 
     server.verify().await;
-    assert_eq!(vec!["Hello World"], received);
+    assert_eq!(vec![Message::Text("Hello World".to_string())], received);
 }

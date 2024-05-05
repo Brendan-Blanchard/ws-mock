@@ -16,7 +16,7 @@ pub async fn main() {
 
     WsMock::new()
         .matcher(JsonExact::new(expected_json))
-        .respond_with("heartbeat".to_string())
+        .respond_with(Message::Text("heartbeat".to_string()))
         .expect(1)
         .mount(&server)
         .await;

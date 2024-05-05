@@ -32,11 +32,11 @@ pub async fn send_to_server(
 pub async fn collect_all_messages(
     mut ws_recv: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     timeout: Duration,
-) -> Vec<String> {
+) -> Vec<Message> {
     let mut received = Vec::new();
 
     while let Ok(Some(Ok(message))) = tokio::time::timeout(timeout, ws_recv.next()).await {
-        received.push(message.to_string());
+        received.push(message);
     }
     received
 }

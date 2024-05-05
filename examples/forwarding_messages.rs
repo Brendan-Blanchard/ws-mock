@@ -23,11 +23,23 @@ pub async fn main() {
 
     let (_send, ws_recv) = stream.split();
 
-    mpsc_send.send(Message::Text("message-1".to_string())).await.unwrap();
-    mpsc_send.send(Message::Text("message-2".to_string())).await.unwrap();
+    mpsc_send
+        .send(Message::Text("message-1".to_string()))
+        .await
+        .unwrap();
+    mpsc_send
+        .send(Message::Text("message-2".to_string()))
+        .await
+        .unwrap();
 
     let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
 
     server.verify().await;
-    assert_eq!(vec!["message-1", "message-2"], received);
+    assert_eq!(
+        vec![
+            Message::Text("message-1".to_string()),
+            Message::Text("message-2".to_string())
+        ],
+        received
+    );
 }
