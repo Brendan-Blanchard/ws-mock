@@ -56,7 +56,7 @@ const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected num
 #[derive(Debug)]
 pub struct WsMock {
     matchers: Vec<Box<dyn Matcher>>,
-    response_data: Option<Message>,
+    response_data: Vec<Message>,
     forwarding_channel: Option<MpscReceiver<Message>>,
     expected_calls: Option<usize>,
     calls: usize,
@@ -72,7 +72,7 @@ impl WsMock {
     pub fn new() -> WsMock {
         WsMock {
             matchers: Vec::new(),
-            response_data: None,
+            response_data: Vec::new(),
             forwarding_channel: None,
             expected_calls: None,
             calls: 0,
@@ -89,7 +89,7 @@ impl WsMock {
 
     /// Respond with a message, if/when all attached matchers match on a message.
     pub fn respond_with(mut self, data: Message) -> Self {
-        self.response_data = Some(data);
+        self.response_data.push(data);
         self
     }
 
@@ -170,7 +170,7 @@ impl WsMock {
     /// Mounting a mock without having called `.respond_with(...)`, `.forward_from_channel(...)`, or
     /// `.expect(...)` will panic, since the mock by definition can have no effects.
     pub async fn mount(self, server: &WsMockServer) {
-        if self.response_data.is_none()
+        if self.response_data.is_empty()
             && self.expected_calls.is_none()
             && self.forwarding_channel.is_none()
         {
@@ -436,7 +436,7 @@ impl WsMockServer {
         for mock in &mut state_guard.mocks {
             if mock.matches_all(text) {
                 mock.calls += 1;
-                if let Some(data) = &mock.response_data {
+                for data in mock.response_data.iter() {
                     mpsc_send.send(data.clone()).await.unwrap();
                 }
             }
@@ -536,6 +536,32 @@ mod tests {
 
         server.verify().await;
         assert_eq!(vec![Message::Binary(message)], received);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_messages() {
+        let server = WsMockServer::start().await;
+
+        WsMock::new()
+            .matcher(Any::new())
+            .respond_with(Message::Text("message-1".to_string()))
+            .respond_with(Message::Text("message-2".to_string()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let recv = send_to_server(&server, "{ data: [42] }".into()).await;
+
+        let received = collect_all_messages(recv, Duration::from_millis(250)).await;
+
+        server.verify().await;
+        assert_eq!(
+            vec![
+                Message::Text("message-1".to_string()),
+                Message::Text("message-2".to_string())
+            ],
+            received
+        );
     }
 
     #[tokio::test]
