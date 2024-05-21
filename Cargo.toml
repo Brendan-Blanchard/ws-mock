@@ -1,6 +1,6 @@
 [package]
 name = "ws-mock"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Brendan Blanchard"]
 description = "A websocket mock server for testing, inspired by Wiremock."
