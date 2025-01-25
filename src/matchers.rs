@@ -176,8 +176,11 @@ impl JsonExact {
 
 impl Matcher for JsonExact {
     fn matches(&self, text: &str) -> bool {
-        let json: Value = serde_json::from_str(text).expect("Message failed to deserialize");
-        json == self.json
+        if let Ok(json) = serde_json::from_str::<Value>(text) {
+            json == self.json
+        } else {
+            false
+        }
     }
 }
 
@@ -245,8 +248,11 @@ impl JsonPartial {
 
 impl Matcher for JsonPartial {
     fn matches(&self, text: &str) -> bool {
-        let json: Value = serde_json::from_str(text).expect("Message failed to deserialize");
-        Self::match_json(&json, &self.pattern)
+        if let Ok(json) = serde_json::from_str::<Value>(text) {
+            Self::match_json(&json, &self.pattern)
+        } else {
+            false
+        }
     }
 }
 
@@ -327,21 +333,19 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Message failed to deserialize")]
-    fn json_exact_fails_on_invalid_data() {
+    fn json_exact_does_not_match_on_invalid_data() {
         let expected_json = json!({});
         let matcher = JsonExact::new(expected_json);
 
-        matcher.matches("-");
+        assert!(!matcher.matches("-"));
     }
 
     #[test]
-    #[should_panic(expected = "Message failed to deserialize")]
-    fn json_partial_fails_on_invalid_data() {
+    fn json_partial_does_not_match_on_invalid_data() {
         let expected_json = json!({});
         let matcher = JsonPartial::new(expected_json);
 
-        matcher.matches("-");
+        assert!(!matcher.matches("-"));
     }
 
     #[test]
