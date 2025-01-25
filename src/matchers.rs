@@ -121,7 +121,7 @@ impl<'a> StringContains<'a> {
     }
 }
 
-impl<'a> Matcher for StringContains<'a> {
+impl Matcher for StringContains<'_> {
     fn matches(&self, text: &str) -> bool {
         text.contains(self.string)
     }
@@ -139,7 +139,7 @@ impl<'a> StringExact<'a> {
     }
 }
 
-impl<'a> Matcher for StringExact<'a> {
+impl Matcher for StringExact<'_> {
     fn matches(&self, text: &str) -> bool {
         text == self.string
     }
