@@ -1,4 +1,4 @@
-### v0.2.2
+### v0.3.0
 
 - Update `JsonExact` and `JsonPartial` to not panic on non-parseable JSON
 - BREAKING - Update to tokio-tungstenite 0.26.2

@@ -781,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "ws-mock"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "futures-util",
  "serde_json",
