@@ -1,6 +1,9 @@
 ### v0.2.2
 
 - Update `JsonExact` and `JsonPartial` to not panic on non-parseable JSON
+- BREAKING - Update to tokio-tungstenite 0.26.2
+    - The underlying types of `tungstenite::protocol::Message` have changed, but should be easy to migrate using
+      From/Into
 
 ### v0.2.1
 

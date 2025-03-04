@@ -24,11 +24,11 @@ pub async fn main() {
     let (_send, ws_recv) = stream.split();
 
     mpsc_send
-        .send(Message::Text("message-1".to_string()))
+        .send(Message::Text("message-1".into()))
         .await
         .unwrap();
     mpsc_send
-        .send(Message::Text("message-2".to_string()))
+        .send(Message::Text("message-2".into()))
         .await
         .unwrap();
 
@@ -37,8 +37,8 @@ pub async fn main() {
     server.verify().await;
     assert_eq!(
         vec![
-            Message::Text("message-1".to_string()),
-            Message::Text("message-2".to_string())
+            Message::Text("message-1".into()),
+            Message::Text("message-2".into())
         ],
         received
     );

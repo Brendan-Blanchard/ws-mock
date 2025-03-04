@@ -45,7 +45,7 @@ const INCOMPLETE_MOCK_PANIC: &str = "A mock must have a response or expected num
 ///
 ///     WsMock::new()
 ///         .matcher(Any::new())
-///         .respond_with(Message::Text("Hello World".to_string()))
+///         .respond_with(Message::Text("Hello World".into()))
 ///         .expect(0)
 ///         .mount(&server)
 ///         .await;
@@ -140,13 +140,13 @@ impl WsMock {
     ///
     ///     let (_send, ws_recv) = stream.split();
     ///
-    ///     mpsc_send.send(Message::Text("message-1".to_string())).await.unwrap();
+    ///     mpsc_send.send(Message::Text("message-1".into())).await.unwrap();
     ///     mpsc_send.send(Message::Text("message-2".into())).await.unwrap();
     ///
     ///     let received = collect_all_messages(ws_recv, Duration::from_millis(250)).await;
     ///
     ///     server.verify().await;
-    ///     assert_eq!(vec![Message::Text("message-1".to_string()), Message::Text("message-2".to_string())], received);
+    ///     assert_eq!(vec![Message::Text("message-1".into()), Message::Text("message-2".into())], received);
     /// }
     /// ```
     ///
@@ -246,7 +246,7 @@ impl ServerState {
 ///
 ///     WsMock::new()
 ///         .matcher(Any::new())
-///         .respond_with(Message::Text("Hello World".to_string()))
+///         .respond_with(Message::Text("Hello World".into()))
 ///         .expect(1)
 ///         .mount(&server)
 ///         .await;
@@ -505,7 +505,7 @@ mod tests {
         // ::default() is same as ::new()
         WsMock::default()
             .matcher(Any::new())
-            .respond_with(Message::Text("Mock-2".to_string()))
+            .respond_with(Message::Text("Mock-2".into()))
             .expect(1)
             .mount(&server)
             .await;
@@ -515,7 +515,7 @@ mod tests {
         let received = collect_all_messages(recv, Duration::from_millis(250)).await;
 
         server.verify().await;
-        assert_eq!(vec![Message::Text("Mock-2".to_string())], received);
+        assert_eq!(vec![Message::Text("Mock-2".into())], received);
     }
 
     #[tokio::test]
@@ -525,7 +525,7 @@ mod tests {
 
         WsMock::default()
             .matcher(Any::new())
-            .respond_with(Message::Binary(message.clone()))
+            .respond_with(Message::Binary(message.clone().into()))
             .expect(1)
             .mount(&server)
             .await;
@@ -535,7 +535,7 @@ mod tests {
         let received = collect_all_messages(recv, Duration::from_millis(250)).await;
 
         server.verify().await;
-        assert_eq!(vec![Message::Binary(message)], received);
+        assert_eq!(vec![Message::Binary(message.into())], received);
     }
 
     #[tokio::test]
@@ -544,8 +544,8 @@ mod tests {
 
         WsMock::new()
             .matcher(Any::new())
-            .respond_with(Message::Text("message-1".to_string()))
-            .respond_with(Message::Text("message-2".to_string()))
+            .respond_with(Message::Text("message-1".into()))
+            .respond_with(Message::Text("message-2".into()))
             .expect(1)
             .mount(&server)
             .await;
@@ -557,8 +557,8 @@ mod tests {
         server.verify().await;
         assert_eq!(
             vec![
-                Message::Text("message-1".to_string()),
-                Message::Text("message-2".to_string())
+                Message::Text("message-1".into()),
+                Message::Text("message-2".into())
             ],
             received
         );
@@ -583,7 +583,7 @@ mod tests {
         let (_send, ws_recv) = stream.split();
 
         mpsc_send
-            .send(Message::Text("message-1".to_string()))
+            .send(Message::Text("message-1".into()))
             .await
             .unwrap();
         mpsc_send
@@ -596,8 +596,8 @@ mod tests {
         server.verify().await;
         assert_eq!(
             vec![
-                Message::Text("message-1".to_string()),
-                Message::Text("message-2".to_string()),
+                Message::Text("message-1".into()),
+                Message::Text("message-2".into()),
             ],
             received
         );
@@ -626,7 +626,7 @@ mod tests {
 
         WsMock::new()
             .matcher(Any::new())
-            .respond_with(Message::Text("Mock-1".to_string()))
+            .respond_with(Message::Text("Mock-1".into()))
             .expect(2)
             .mount(&server)
             .await;
