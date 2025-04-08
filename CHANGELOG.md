@@ -1,3 +1,7 @@
+### v0.3.1
+
+- Update Tokio to 1.44.2 for security vulnerability fix
+
 ### v0.3.0
 
 - Update `JsonExact` and `JsonPartial` to not panic on non-parseable JSON
