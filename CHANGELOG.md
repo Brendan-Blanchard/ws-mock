@@ -1,3 +1,7 @@
+### v0.3.2
+
+- Update tokio-tungstenite to 0.27.0
+
 ### v0.3.1
 
 - Update Tokio to 1.44.2 for security vulnerability fix
