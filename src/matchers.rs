@@ -262,7 +262,7 @@ mod tests {
         Any, AnyThat, JsonExact, JsonPartial, Matcher, StringContains, StringExact,
     };
     use serde_json;
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
     use std::str::FromStr;
 
     #[test]

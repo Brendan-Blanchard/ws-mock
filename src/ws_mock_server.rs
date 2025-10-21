@@ -9,10 +9,10 @@ use tokio::sync::broadcast::Receiver as BroadcastReceiver;
 use tokio::sync::broadcast::Sender as BroadcastSender;
 use tokio::sync::mpsc::Sender as MpscSender;
 use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender};
-use tokio::sync::{Notify, RwLock, broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Notify, RwLock};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{WebSocketStream, accept_async};
+use tokio_tungstenite::{accept_async, WebSocketStream};
 
 use tracing::debug;
 
@@ -454,13 +454,13 @@ impl WsMockServer {
         let mut results = Vec::new();
 
         for mock in &state_guard.mocks {
-            if let Some(expected) = mock.expected_calls
-                && expected != mock.calls
-            {
-                results.push(format!(
-                    "Expected {} matching calls, but received {}\nCalled With:",
-                    expected, mock.calls
-                ));
+            if let Some(expected) = mock.expected_calls {
+                if expected != mock.calls {
+                    results.push(format!(
+                        "Expected {} matching calls, but received {}\nCalled With:",
+                        expected, mock.calls
+                    ));
+                }
             }
         }
 
