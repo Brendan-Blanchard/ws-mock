@@ -455,12 +455,13 @@ impl WsMockServer {
 
         for mock in &state_guard.mocks {
             if let Some(expected) = mock.expected_calls
-                && expected != mock.calls {
-                    results.push(format!(
-                        "Expected {} matching calls, but received {}\nCalled With:",
-                        expected, mock.calls
-                    ));
-                }
+                && expected != mock.calls
+            {
+                results.push(format!(
+                    "Expected {} matching calls, but received {}\nCalled With:",
+                    expected, mock.calls
+                ));
+            }
         }
 
         if !results.is_empty() {
