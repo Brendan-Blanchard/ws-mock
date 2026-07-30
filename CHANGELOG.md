@@ -1,3 +1,7 @@
+### v0.6.0
+
+- Update tokio-tungstenite to 0.30.0
+
 ### v0.5.0
 
 - Update tokio-tungstenite to 0.29.0
